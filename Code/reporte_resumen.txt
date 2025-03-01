@@ -1,0 +1,8 @@
+Hubo un total de 7 entregas procesadas.
+
+Las ciudades con más entregas pendientes (1 entregas pendientes) son: Bogotá, Medellín, Cartagena.
+
+Se realizaron un total de 4 entregas exitosas.
+
+Monto total de entregas realizadas. : 57801.65
+

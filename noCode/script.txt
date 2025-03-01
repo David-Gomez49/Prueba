@@ -1,0 +1,138 @@
+function procesarDatos() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName("Hoja 1"); // Cambia "Pedidos" por el nombre correcto de tu hoja
+  if (!sheet) {
+    Logger.log("No se encontró la hoja especificada.");
+    return;
+  }
+
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+
+  // Índices de las columnas (ajusta estos índices según tu hoja)
+  const fechaPedidoIndex = headers.indexOf('Fecha_Pedido');
+  const clienteIndex = headers.indexOf('Cliente');
+  const valorIndex = headers.indexOf('Valor');
+  const estadoEntregaIndex = headers.indexOf('Estado_Entrega');
+  const correoClienteIndex = headers.indexOf('Correo_Cliente'); // Columna de correo
+  const ciudadIndex = headers.indexOf('Ciudad'); // Columna de Ciudad
+
+  // Filtrar las filas y realizar las transformaciones
+  const processedData = data.filter((row, i) => {
+    if (i === 0) return true; // Mantener la primera fila (cabecera)
+    if (row[estadoEntregaIndex].toLowerCase().includes('devuelto')) return false; // Filtrar si el estado contiene 'Devuelto'
+
+    // Convertir Fecha_Pedido a formato YYYY-MM-DD
+    row[fechaPedidoIndex] = formatDate(row[fechaPedidoIndex]);
+
+    // Limpiar el campo Cliente eliminando espacios extra
+    row[clienteIndex] = row[clienteIndex].trim();
+
+    // Unificar el campo Valor con punto decimal y dos decimales
+    row[valorIndex] = parseFloat(row[valorIndex]).toFixed(2);
+
+    // Procesar correos según el Estado_Entrega
+    if (row[estadoEntregaIndex].toLowerCase().includes('entregado')) {
+      sendEmail(row[correoClienteIndex], 'Tu pedido ha sido entregado 🎉');
+    } else if (row[estadoEntregaIndex].toLowerCase().includes('pendiente')) {
+      sendEmail(row[correoClienteIndex], 'Tu pedido está en camino 🚚');
+    }
+
+    return true;
+  });
+
+  // Crear una nueva hoja en el archivo actual con los datos procesados
+  let processedSheet = ss.getSheetByName('Entregas Procesadas');
+  if (!processedSheet) {
+    processedSheet = ss.insertSheet('Entregas Procesadas');
+  } else {
+    processedSheet.clear(); // Limpiar la hoja si ya existe
+  }
+  processedSheet.getRange(1, 1, processedData.length, processedData[0].length).setValues(processedData);
+
+  // Crear el archivo Excel con los datos procesados
+  const newFile = DriveApp.createFile('entregas_procesadas.xlsx', '', MimeType.MICROSOFT_EXCEL);
+  const processedSpreadsheet = SpreadsheetApp.create("Procesadas");
+  const newProcessedSheet = processedSpreadsheet.getSheets()[0];
+  newProcessedSheet.getRange(1, 1, processedData.length, processedData[0].length).setValues(processedData);
+
+  // Actualizar el resumen en la misma hoja (si ya existe)
+  const resumen = createSummary(processedData, estadoEntregaIndex, valorIndex, ciudadIndex);
+  let summarySheet = ss.getSheetByName('Resumen de Entregas');
+  if (!summarySheet) {
+    summarySheet = ss.insertSheet('Resumen de Entregas');
+  } else {
+    summarySheet.clear(); // Limpiar la hoja si ya existe
+  }
+  summarySheet.getRange(1, 1).setValue('Resumen de Entregas');
+  summarySheet.getRange(2, 1).setValue(resumen);
+
+  // Crear el resumen en un archivo de texto
+  const resumenFile = DriveApp.createFile('reporte_resumen.txt', resumen);
+}
+
+// Función para convertir la fecha a formato YYYY-MM-DD
+function formatDate(date) {
+  if (!date) return '';
+  const d = new Date(date);
+  return Utilities.formatDate(d, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+}
+
+// Función para enviar el correo
+function sendEmail(correo, subject) {
+  if (!correo || !isValidEmail(correo)) {
+    Logger.log("Correo no válido: " + correo);
+    return;
+  }
+  MailApp.sendEmail(correo, subject, "Tu pedido ha sido procesado correctamente.");
+}
+
+// Validar que el correo electrónico es correcto
+function isValidEmail(email) {
+  const regex = /^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+  return regex.test(email);
+}
+
+// Función para generar el resumen
+function createSummary(data, estadoEntregaIndex, valorIndex, ciudadIndex) {
+  let totalDeliveries = 0;
+  let pendingCities = {};
+  let totalAmount = 0;
+  let maxReturnedCities = {};
+
+  // Contar las entregas procesadas, las ciudades con entregas pendientes y devueltas
+  data.forEach(row => {
+    if (row[estadoEntregaIndex].toLowerCase().includes('entregado')) {
+      totalDeliveries++;
+      totalAmount += parseFloat(row[valorIndex]);
+    }
+    if (row[estadoEntregaIndex].toLowerCase().includes('pendiente')) {
+      const city = row[ciudadIndex]; // Utilizar ciudad
+      pendingCities[city] = (pendingCities[city] || 0) + 1;
+    }
+    if (row[estadoEntregaIndex].toLowerCase().includes('devuelto')) {
+      const city = row[ciudadIndex]; // Utilizar ciudad
+      maxReturnedCities[city] = (maxReturnedCities[city] || 0) + 1;
+    }
+  });
+
+  // Ordenar las ciudades por el número de entregas pendientes (de mayor a menor)
+  const sortedCities = Object.entries(pendingCities)
+    .sort((a, b) => b[1] - a[1]);  // Ordenar de mayor a menor
+
+  // Seleccionar solo las ciudades con el mayor número de entregas pendientes
+  const topCities = sortedCities.filter(city => city[1] === sortedCities[0][1]).map(city => city[0]);
+
+  // Ordenar las ciudades por el número de entregas devueltas (de mayor a menor)
+  const sortedReturnedCities = Object.entries(maxReturnedCities)
+    .sort((a, b) => b[1] - a[1]);  // Ordenar de mayor a menor
+
+  // Seleccionar solo las ciudades con el mayor número de entregas devueltas
+  const topReturnedCities = sortedReturnedCities.filter(city => city[1] === sortedReturnedCities[0][1]).map(city => city[0]);
+
+  // Generar el resumen
+  return `📦 Número total de entregas procesadas: ${totalDeliveries}
+🏙️ Ciudades con más entregas pendientes: ${topCities.join(', ')} (${sortedCities[0][1]})
+💰 Monto total de entregas realizadas: ${totalAmount.toFixed(2)}
+🚚 Ciudades con más entregas devueltas: ${topReturnedCities.join(', ')} (${sortedReturnedCities[0] ? sortedReturnedCities[0][1] : 0})`;
+}
