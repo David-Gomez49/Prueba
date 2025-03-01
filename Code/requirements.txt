@@ -1,0 +1,8 @@
+datetime
+email
+pandas
+smtplib
+tkinter
+os
+cryptography
+#pip install -r requirements.txt
